@@ -7,6 +7,73 @@ from torch.utils.data import DataLoader, TensorDataset
 torch.manual_seed(1)
 np.random.seed(1)
 
+class MyModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        l1 = nn.Linear(2, 6)
+        a1 = nn.ReLU()
+        l2 = nn.Linear(6, 6)
+        a2 = nn.ReLU()
+        l3 = nn.Linear(6, 1)
+        a3 = nn.Sigmoid()
+        l = [l1, a1, l2, a2, l3, a3]
+        self.module_list = nn.ModuleList(l)
+
+    def forward(self, x):
+        for f in self.module_list:
+            x = f(x)
+        return x
+
+    def predict(self, x):
+        x = torch.tensor(x, dtype=torch.float32)
+        pred = self.forward(x)[:, 0]
+        return (pred>=0.5).float()
+
+class MyNoisyModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = NoisyLinear(2, 6, 0.07)
+        self.a1 = nn.ReLU()
+        self.l2 = nn.Linear(6, 6)
+        self.a2 = nn.ReLU()
+        self.l3 = nn.Linear(6, 1)
+        self.a3 = nn.Sigmoid()
+
+    def forward(self, x, training=False):
+        x = self.l1(x, training)
+        x = self.a1(x)
+        x = self.l2(x)
+        x = self.a2(x)
+        x = self.l3(x)
+        x = self.a3(x)
+        
+        return x
+
+    def predict(self, x):
+        x = torch.tensor(x, dtype=torch.float32)
+        pred = self.forward(x)[:, 0]
+        return (pred>=0.5).float()
+
+class NoisyLinear(nn.Module):
+    def __init__(self, input_size, output_size, noise_stddev=0.1):
+        super().__init__()
+        w = torch.Tensor(input_size, output_size)
+        self.w = nn.Parameter(w)
+
+        nn.init.xavier_uniform_(self.w)
+        b = torch.Tensor(output_size).fill_(0)
+        self.b = nn.Parameter(b)
+        self.noise_stddev = noise_stddev
+
+    def forward(self, x, training=False):
+        if training:
+            noise = torch.normal(0.0, self.noise_stddev, x.shape)
+            x_new = torch.add(x, noise)
+        else:
+            x_new = x
+
+        return torch.add(torch.mm(x_new, self.w), self.b)
+
 def train(model, num_epochs, train_dl, x_valid, y_valid):
     loss_hist_train = [0] * num_epochs
     accuracy_hist_train = [0] * num_epochs
@@ -79,6 +146,64 @@ ax.set_xlabel('Эпохи', size=15)
 ax = fig.add_subplot(1, 2, 2)
 plt.plot(history[2], lw=4)
 plt.plot(history[3], lw=4)
+plt.legend(['Точность при обучении', 'Точность при валидации'], fontsize=15)
+ax.set_xlabel('Эпохи', size=15)
+plt.show()
+
+model = MyModule()
+loss_fn = nn.BCELoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.015)
+history = train(model, num_epochs, train_dl, x_valid, y_valid)
+
+fig = plt.figure(figsize=(16, 4))
+ax = fig.add_subplot(1, 2, 1)
+plt.plot(history[0], lw=4)
+plt.plot(history[1], lw=4)
+plt.legend(['Потери при обучении', 'Потери при валидации'], fontsize=15)
+ax.set_xlabel('Эпохи', size=15)
+ax = fig.add_subplot(1, 2, 2)
+plt.plot(history[2], lw=4)
+plt.plot(history[3], lw=4)
+plt.legend(['Точность при обучении', 'Точность при валидации'], fontsize=15)
+ax.set_xlabel('Эпохи', size=15)
+plt.show()
+
+model = MyNoisyModule()
+loss_fn = nn.BCELoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.015)
+
+loss_hist_train = [0] * num_epochs
+accuracy_hist_train = [0] * num_epochs
+loss_hist_valid = [0] * num_epochs
+accuracy_hist_valid = [0] * num_epochs
+
+for epoch in range(num_epochs):
+    for x_batch, y_batch in train_dl:
+        pred = model(x_batch, True)[:, 0]
+        loss = loss_fn(pred, y_batch)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        loss_hist_train[epoch] += loss.item()
+        is_correct = ((pred>=0.5).float() == y_batch).float()
+        accuracy_hist_train[epoch] += is_correct.mean()
+    loss_hist_train[epoch] /= n_train/batch_size
+    accuracy_hist_train[epoch] /= n_train/batch_size
+    pred = model(x_valid)[:, 0]
+    loss = loss_fn(pred, y_valid)
+    loss_hist_valid[epoch] = loss.item()
+    is_correct = ((pred>=0.5).float() == y_valid).float()
+    accuracy_hist_valid[epoch] += is_correct.mean()
+
+fig = plt.figure(figsize=(16, 4))
+ax = fig.add_subplot(1, 2, 1)
+plt.plot(loss_hist_train, lw=4)
+plt.plot(loss_hist_valid, lw=4)
+plt.legend(['Потери при обучении', 'Потери при валидации'], fontsize=15)
+ax.set_xlabel('Эпохи', size=15)
+ax = fig.add_subplot(1, 2, 2)
+plt.plot(accuracy_hist_train, lw=4)
+plt.plot(accuracy_hist_valid, lw=4)
 plt.legend(['Точность при обучении', 'Точность при валидации'], fontsize=15)
 ax.set_xlabel('Эпохи', size=15)
 plt.show()
